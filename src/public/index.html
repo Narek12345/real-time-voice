@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Голосовой диалог с ElevenLabs</title>
+  <style>
+    body { font-family: sans-serif; text-align: center; margin-top: 2em; }
+    button { font-size: 1.2em; padding: 0.5em 1em; margin: 0.5em; }
+    #log { margin-top: 1em; white-space: pre-wrap; background: #f0f0f0; padding: 1em; border-radius: 5px; max-width: 600px; margin-left: auto; margin-right: auto; }
+  </style>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+</head>
+<body>
+  <h1>🎤 Говори — и слушай ответ</h1>
+  <button id="start">Старт</button>
+  <button id="stop" disabled>Стоп</button>
+  <audio id="audio" controls style="display:none;"></audio>
+  <div id="log"></div>
+
+  <script>
+    let socket;
+    let recognition;
+    const logEl = document.getElementById('log');
+    const startBtn = document.getElementById('start');
+    const stopBtn = document.getElementById('stop');
+    const audio = document.getElementById('audio');
+
+    function log(msg) {
+      logEl.textContent += msg + '\n';
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+
+    startBtn.onclick = () => {
+      socket = io("ws://localhost:8000"); // или просто io()
+
+      socket.on('connect', () => {
+        log("✅ Соединение установлено");
+        startBtn.disabled = true;
+        stopBtn.disabled = false;
+
+        recognition = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+        recognition.lang = 'ru-RU';
+        recognition.continuous = true;
+        recognition.interimResults = false;
+
+        recognition.onresult = (event) => {
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            if (event.results[i].isFinal) {
+              const text = event.results[i][0].transcript.trim();
+              log("👤 Ты: " + text);
+              socket.emit('user_message', text);
+            }
+          }
+        };
+
+        recognition.onerror = (e) => {
+          log("❗ Ошибка речи: " + e.error);
+        };
+
+        // recognition.onend = () => {
+        //   if (socket.connected) recognition.start();
+        // };
+
+        recognition.onend = () => {
+          log("🛑 Распознавание остановлено (onend)");
+        };
+
+        recognition.start();
+      });
+
+      socket.on('bot_message', (msg) => {
+        log("🤖: " + msg);
+      });
+
+      socket.on('bot_audio', (audioBuffer) => {
+        const blob = new Blob([audioBuffer], { type: "audio/mpeg" });
+        const url = URL.createObjectURL(blob);
+        audio.src = url;
+        audio.style.display = 'block';
+        audio.play();
+        log("🔊 Воспроизводится ответ");
+      });
+
+      socket.on('disconnect', () => {
+        log("🔌 Соединение закрыто");
+        startBtn.disabled = false;
+        stopBtn.disabled = true;
+        if (recognition) recognition.stop();
+      });
+    };
+
+    stopBtn.onclick = () => {
+      if (recognition) {
+        recognition.stop();
+        recognition = null;
+      }
+      if (socket) {
+        socket.disconnect();
+        socket = null;
+      }
+      stopBtn.disabled = true;
+      startBtn.disabled = false;
+      log("🛑 Остановлено");
+    };
+  </script>
+</body>
+</html>
